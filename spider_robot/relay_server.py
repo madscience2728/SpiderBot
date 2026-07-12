@@ -87,30 +87,55 @@ def camera_frame():
     raise HTTPException(status_code=501, detail="camera not wired up yet")
 
 
-def _execute_action(action: str, speed: int):
-    """The ONLY place allowed to talk to the servos. Holding _lock for the
-    full duration of the physical action prevents the watchdog and a
-    /gait request from ever fighting over the hardware at the same time."""
+def _try_execute_action(action: str, speed: int) -> bool:
+    """Attempt to execute an action RIGHT NOW. Does NOT wait in line if the
+    robot is already mid-action — returns False immediately instead, so a
+    caller always gets an unambiguous answer (executed vs. busy) rather than
+    silently queueing behind an unknown backlog."""
     global _last_command_time
-    with _lock:
+    acquired = _lock.acquire(blocking=False)
+    if not acquired:
+        return False
+    try:
         if action in POSE_ACTIONS:
             crawler.do_step(action, speed)
         else:
-            crawler.do_action(action, 1, speed)  # step_count=1: once, not repeated
-        _last_command_time = time.time()  # stamped AFTER completion, not before
+            crawler.do_action(action, 1, speed)
+        _last_command_time = time.time()
+        return True
+    finally:
+        _lock.release()
+
+
+def _force_safe_sit():
+    """Used by the watchdog and /stop — sitting down is a SAFETY action, so
+    unlike normal gait commands it's allowed to wait briefly for the lock
+    rather than being rejected outright. Bounded wait, not infinite."""
+    global _last_command_time
+    acquired = _lock.acquire(timeout=5)
+    if not acquired:
+        return False
+    try:
+        crawler.do_step("sit", DEFAULT_SPEED)
+        _last_command_time = time.time()
+        return True
+    finally:
+        _lock.release()
 
 
 @app.post("/gait")
 def gait(cmd: GaitCommand):
     if cmd.action not in VALID_ACTIONS:
         raise HTTPException(status_code=400, detail=f"unknown action: {cmd.action}")
-    _execute_action(cmd.action, cmd.speed)
+    if not _try_execute_action(cmd.action, cmd.speed):
+        raise HTTPException(status_code=409, detail="robot busy executing a previous action")
     return {"executed": cmd.action}
 
 
 @app.post("/stop")
 def stop():
-    _execute_action("sit", DEFAULT_SPEED)
+    if not _force_safe_sit():
+        raise HTTPException(status_code=503, detail="robot unresponsive, could not acquire control")
     return {"executed": "sit"}
 
 
@@ -121,7 +146,7 @@ def _watchdog_loop():
         with _lock:
             idle = time.time() - _last_command_time
         if idle > WATCHDOG_TIMEOUT:
-            _execute_action("sit", DEFAULT_SPEED)
+            _force_safe_sit()
 
 
 threading.Thread(target=_watchdog_loop, daemon=True).start()
