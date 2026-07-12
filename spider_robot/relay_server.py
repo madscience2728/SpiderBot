@@ -95,13 +95,16 @@ def _try_execute_action(action: str, speed: int) -> bool:
     global _last_command_time
     acquired = _lock.acquire(blocking=False)
     if not acquired:
+        print(f"[relay] BUSY — rejected action={action!r}")
         return False
     try:
+        print(f"[relay] Executing action={action!r} speed={speed}")
         if action in POSE_ACTIONS:
             crawler.do_step(action, speed)
         else:
             crawler.do_action(action, 1, speed)
         _last_command_time = time.time()
+        print(f"[relay] Completed action={action!r}")
         return True
     finally:
         _lock.release()
@@ -146,6 +149,7 @@ def _watchdog_loop():
         with _lock:
             idle = time.time() - _last_command_time
         if idle > WATCHDOG_TIMEOUT:
+            print(f"[relay] WATCHDOG: idle {idle:.1f}s > {WATCHDOG_TIMEOUT}s, forcing safe sit")
             _force_safe_sit()
 
 

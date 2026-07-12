@@ -22,6 +22,8 @@ _system_prompt = load_system_prompt()
 def decide_and_act(sensors: dict) -> dict:
     """One full LLM-driven cycle: observe (sensors) -> decide (tool call)
     -> act (execute it). Returns what happened, for logging/status."""
+    print(f"\n[llm_brain] Sensors: {sensors}")
+
     messages = [
         {"role": "system", "content": _system_prompt},
         {
@@ -31,9 +33,19 @@ def decide_and_act(sensors: dict) -> dict:
     ]
 
     _adapter.ensure_ready()
+
+    print("[llm_brain] Sending to LLM...")
     response = _adapter.complete_with_tools(messages, GAIT_TOOLS)
 
+    print(f"[llm_brain] Response received — has tool_calls: {bool(response.get('tool_calls'))}")
+    if response.get("tool_calls"):
+        names = [tc["function"]["name"] for tc in response["tool_calls"]]
+        print(f"[llm_brain] Tool call(s) requested: {names}")
+    if response.get("content"):
+        print(f"[llm_brain] Content: {response['content'][:200]}")
+
     if not response.get("tool_calls"):
+        print("[llm_brain] WARNING: model did not choose a tool")
         return {
             "action": None,
             "reason": "model did not choose a tool",
@@ -48,5 +60,8 @@ def decide_and_act(sensors: dict) -> dict:
     except (json.JSONDecodeError, KeyError):
         arguments = {}
 
+    print(f"[llm_brain] Executing: {function_name}({arguments})")
     result = execute_tool(function_name, arguments)
+    print(f"[llm_brain] Execution result: {result}")
+
     return {"tool_chosen": function_name, "execution_result": result}
