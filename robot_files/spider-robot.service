@@ -1,0 +1,17 @@
+[Unit]
+Description=Spider robot relay server (thin body, no brains)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/spider
+ExecStart=/usr/bin/python3 -m spider_robot
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
