@@ -2,6 +2,7 @@
   "llm_config": {
     "base_url": "http://localhost:8080",
     "model_name": "gemma-4-12B-it-QAT-Q4_0.gguf",
+    "mmproj": "mmproj-gemma-4-12B-it-QAT-BF16.gguf",
     "port": 8080,
     "ctx_size": 8192,
     "timeout": 60

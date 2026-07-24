@@ -22,6 +22,7 @@ class LLMAdapter:
 
         self.base_url = lm_config["base_url"]
         self.model_name = lm_config["model_name"]
+        self.mmproj = lm_config.get("mmproj")  # optional -- only present if vision is configured
         self.port = lm_config["port"]
         self.ctx_size = lm_config["ctx_size"]
         self.timeout = lm_config["timeout"]
@@ -36,6 +37,14 @@ class LLMAdapter:
             '-v "${PWD}:/models"',
             DOCKER_IMAGE,
             f"--model /models/{self.model_name}",
+        ]
+
+        # Vision projector -- same as Ezra's adapter: only added if configured,
+        # so this stays a no-op drop-in for anyone not using image input.
+        if self.mmproj:
+            parts.append(f"--mmproj /models/{self.mmproj}")
+
+        parts.extend([
             "--host 0.0.0.0",
             f"--port {self.port}",
             "--n-gpu-layers 99",
@@ -43,7 +52,7 @@ class LLMAdapter:
             "--parallel 1",
             "--flash-attn on",
             "--jinja",  # required — enables the chat template tool-calling needs
-        ]
+        ])
         return " ".join(parts)
 
     def health_check(self, timeout: int = 5) -> bool:

@@ -35,6 +35,18 @@ BATTERY: reads Robot HAT V4's ADC channel A4, which the board wires to the
 battery through a 20K/10K voltage divider (confirmed against SunFounder's
 official Robot HAT V4 docs, not guessed). See /battery below for the exact
 formula and the LED-equivalent thresholds it's based on.
+
+SHARED I2C BUS (found 2026-07-24): the ultrasonic sensor, battery ADC, and
+all gait servos sit on the same physical I2C bus (robot_hat's Robot HAT V4
+address 0x14). The dashboard polls /sensors and /battery continuously in
+the background, independent of whatever gait command is in flight -- with
+no coordination, that polling can read the bus at the exact same instant
+a gait command is writing to it. Two threads racing on one I2C bus without
+mutual exclusion is a plausible cause of intermittent stalls that don't
+correlate with any specific gait or with battery level (both of which were
+ruled out first). Fix: /sensors and /battery now take the same _lock as
+gait commands, with a short timeout so a busy bus just means a skipped
+poll rather than a blocked request.
 """
 
 import threading
@@ -45,6 +57,9 @@ from pydantic import BaseModel
 
 from picrawler import Picrawler
 from robot_hat import Ultrasonic, Pin, ADC
+
+from . import picrawler_fixes
+picrawler_fixes.apply()  # fixes turn_right's TURN_X1/TURN_Y1 coordinate typo -- see picrawler_fixes.py
 
 try:
     from vilib import Vilib
@@ -64,6 +79,7 @@ battery_adc = ADC("A4")  # Robot HAT V4's dedicated battery-sense channel
 # --- Config ---
 DEFAULT_SPEED = 80
 WATCHDOG_TIMEOUT = 30.0 # seconds of silence before auto-sit
+HARDWARE_TIMEOUT = 10.0 # seconds to wait for a hardware call before assuming it's stuck
 
 # Robot HAT V4's ADC->voltage conversion, per SunFounder's own docs:
 # Va4 = raw / 4095.0 * 3.3 (ADC reference voltage)
@@ -81,6 +97,12 @@ VALID_ACTIONS = POSE_ACTIONS | LOCOMOTION_ACTIONS
 _last_command_time = time.time()
 _lock = threading.Lock()
 _camera_started = False
+# Set when a hardware call doesn't return within HARDWARE_TIMEOUT -- almost
+# always means a stuck I2C transaction at the kernel/smbus level (see
+# _run_hardware_call below). Once set, we stop trusting the robot's state
+# and refuse further commands until the process is restarted -- we cannot
+# actually kill or recover a blocked I2C syscall from here.
+_hardware_fault = False
 
 class GaitCommand(BaseModel):
     action: str
@@ -88,6 +110,8 @@ class GaitCommand(BaseModel):
 
 @app.get("/health")
 def health():
+    if _hardware_fault:
+        return {"status": "hardware_fault", "detail": "restart spider-robot service required"}
     return {"status": "ok"}
 
 @app.on_event("startup")
@@ -123,7 +147,30 @@ def on_shutdown():
 
 @app.get("/sensors")
 def sensors():
-    distance_cm = ultrasonic.read()
+    # Same physical I2C bus as the gait servos -- must not read concurrently
+    # with a gait command mid-flight (see the module docstring note on the
+    # shared-bus race, 2026-07-24). Short acquire timeout: this is normally
+    # a fast, single transaction, so if the bus is genuinely busy with a
+    # gait command it's better to skip this poll than block the request.
+    global _hardware_fault
+    if _hardware_fault:
+        raise HTTPException(status_code=503, detail="hardware fault -- restart required")
+    acquired = _lock.acquire(timeout=1.0)
+    if not acquired:
+        raise HTTPException(status_code=503, detail="robot busy, sensor read skipped this cycle")
+    try:
+        # Guarded with a timeout, NOT called directly -- an earlier version
+        # called ultrasonic.read() unprotected here, and when it hung (no
+        # echo returned, or an I2C stall) it held _lock forever, permanently
+        # starving every future /sensors and /battery request with "busy"
+        # even though nothing was actually executing. See _run_with_timeout.
+        ok, distance_cm = _run_with_timeout(ultrasonic.read, SENSOR_TIMEOUT)
+        if not ok:
+            print(f"[relay] HARDWARE FAULT -- ultrasonic.read() stalled past {SENSOR_TIMEOUT}s")
+            _hardware_fault = True
+            raise HTTPException(status_code=503, detail="ultrasonic read stalled -- restart required")
+    finally:
+        _lock.release()
     return {
         "ultrasonic_cm": distance_cm,
         "timestamp": time.time(),
@@ -136,8 +183,24 @@ def battery():
     BATTERY_ADC_TO_VOLTS above). For reference, the board's own LED
     indicator uses these same voltage bands: both LEDs on above 7.6V
     (healthy), one LED on 7.15-7.6V (getting low), both off below 7.15V
-    (critical) -- the dashboard's battery chip mirrors these."""
-    raw = battery_adc.read()
+    (critical) -- the dashboard's battery chip mirrors these.
+
+    Same shared-I2C-bus lock and stall guard as /sensors above, and for
+    the same reason -- see that endpoint's comments."""
+    global _hardware_fault
+    if _hardware_fault:
+        raise HTTPException(status_code=503, detail="hardware fault -- restart required")
+    acquired = _lock.acquire(timeout=1.0)
+    if not acquired:
+        raise HTTPException(status_code=503, detail="robot busy, battery read skipped this cycle")
+    try:
+        ok, raw = _run_with_timeout(battery_adc.read, SENSOR_TIMEOUT)
+        if not ok:
+            print(f"[relay] HARDWARE FAULT -- battery_adc.read() stalled past {SENSOR_TIMEOUT}s")
+            _hardware_fault = True
+            raise HTTPException(status_code=503, detail="battery read stalled -- restart required")
+    finally:
+        _lock.release()
     voltage = raw * BATTERY_ADC_TO_VOLTS
     return {"voltage": voltage, "raw": raw}
 
@@ -148,33 +211,103 @@ def camera_status():
         "started": _camera_started,
     }
 
-def _try_execute_action(action: str, speed: int) -> bool:
-    global _last_command_time
-    acquired = _lock.acquire(blocking=False)
-    if not acquired:
-        print(f"[relay] BUSY -- rejected action={action!r}")
-        return False
-    try:
-        print(f"[relay] Executing action={action!r} speed={speed}")
+SENSOR_TIMEOUT = 3.0 # ultrasonic/ADC reads should be near-instant; this is generous
+
+def _run_with_timeout(func, timeout: float):
+    """Run func() in a dedicated thread and wait up to `timeout` seconds.
+
+    Returns (True, result) on success, (False, None) if func() didn't
+    return in time. We can't kill a thread blocked inside a C-level I2C
+    syscall -- Python has no safe way to do that -- so a timed-out call
+    means that thread may still be running (and could still eventually
+    touch the bus later, unsupervised). What this DOES buy us: the caller
+    stops waiting and can free _lock instead of holding it forever, which
+    is what actually happened on 2026-07-24 when a bare, unguarded
+    ultrasonic.read() hung and starved every future /sensors and /battery
+    request with a permanent "busy," even though nothing was actually
+    executing.
+    """
+    result = {}
+
+    def _call():
+        result["value"] = func()
+        result["done"] = True
+
+    t = threading.Thread(target=_call, daemon=True)
+    t.start()
+    t.join(timeout=timeout)
+    if t.is_alive():
+        return False, None
+    return True, result.get("value")
+
+
+def _run_hardware_call(action: str, speed: float) -> bool:
+    """Run the actual (potentially blocking) picrawler/robot_hat gait call
+    with a hard timeout -- see _run_with_timeout above for the mechanism.
+
+    Why a timeout is needed at all: crawler.do_step()/do_action() are
+    themselves bounded pure-Python loops (see robot_hat.Robot.servo_move
+    -- fixed step count, small sleeps). What ISN'T bounded is the I2C
+    write underneath each servo update: robot_hat's I2C retry wrapper (5
+    retries, no backoff) sits on top of a raw smbus2/kernel call that can
+    itself block for a long time if the bus is in a bad state. A single
+    stuck transaction during a gait with dozens of servo writes (e.g.
+    turn right's 7 sub-steps) can easily add up past any reasonable
+    request timeout.
+
+    If it does time out, we mark a hardware fault and stop trusting the
+    robot's state entirely -- see _hardware_fault.
+    """
+    global _last_command_time, _hardware_fault
+
+    def _do():
         if action in POSE_ACTIONS:
             crawler.do_step(action, speed)
         else:
             crawler.do_action(action, 1, speed)
-        _last_command_time = time.time()
+
+    ok, _ = _run_with_timeout(_do, HARDWARE_TIMEOUT)
+    if not ok:
+        print(
+            f"[relay] HARDWARE FAULT -- action={action!r} did not return within "
+            f"{HARDWARE_TIMEOUT}s. Likely a stuck I2C transaction. Refusing "
+            f"further commands until restart."
+        )
+        _hardware_fault = True
+        return False
+
+    _last_command_time = time.time()
+    return True
+
+
+def _try_execute_action(action: str, speed: int) -> str:
+    """Returns 'ok', 'busy', or 'fault'."""
+    if _hardware_fault:
+        return "fault"
+    acquired = _lock.acquire(blocking=False)
+    if not acquired:
+        print(f"[relay] BUSY -- rejected action={action!r}")
+        return "busy"
+    try:
+        print(f"[relay] Executing action={action!r} speed={speed}")
+        if not _run_hardware_call(action, speed):
+            return "fault"
         print(f"[relay] Completed action={action!r}")
-        return True
+        return "ok"
     finally:
         _lock.release()
 
-def _force_safe_sit():
-    global _last_command_time
+def _force_safe_sit() -> str:
+    """Returns 'ok', 'busy', or 'fault'."""
+    if _hardware_fault:
+        return "fault"
     acquired = _lock.acquire(timeout=5)
     if not acquired:
-        return False
+        return "busy"
     try:
-        crawler.do_step("sit", DEFAULT_SPEED)
-        _last_command_time = time.time()
-        return True
+        if not _run_hardware_call("sit", DEFAULT_SPEED):
+            return "fault"
+        return "ok"
     finally:
         _lock.release()
 
@@ -182,24 +315,53 @@ def _force_safe_sit():
 def gait(cmd: GaitCommand):
     if cmd.action not in VALID_ACTIONS:
         raise HTTPException(status_code=400, detail=f"unknown action: {cmd.action}")
-    if not _try_execute_action(cmd.action, cmd.speed):
+    result = _try_execute_action(cmd.action, cmd.speed)
+    if result == "busy":
         raise HTTPException(status_code=409, detail="robot busy executing a previous action")
+    if result == "fault":
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"hardware fault: a previous action didn't respond within "
+                f"{HARDWARE_TIMEOUT}s (likely a stuck I2C bus). The relay "
+                f"service needs a restart (sudo systemctl restart spider-robot) "
+                f"and the robot should be physically checked before resuming."
+            ),
+        )
     return {"executed": cmd.action}
 
 @app.post("/stop")
 def stop():
-    if not _force_safe_sit():
+    result = _force_safe_sit()
+    if result == "busy":
         raise HTTPException(status_code=503, detail="robot unresponsive, could not acquire control")
+    if result == "fault":
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"hardware fault: sit didn't respond within {HARDWARE_TIMEOUT}s "
+                f"(likely a stuck I2C bus). Restart the relay service and check "
+                f"the robot physically."
+            ),
+        )
     return {"executed": "sit"}
 
 def _watchdog_loop():
-    global _last_command_time
     while True:
         time.sleep(0.5)
-        with _lock:
-            idle = time.time() - _last_command_time
-            if idle > WATCHDOG_TIMEOUT:
-                print(f"[relay] WATCHDOG: idle {idle:.1f}s > {WATCHDOG_TIMEOUT}s, forcing safe sit")
-                _force_safe_sit()
+        # NOTE: deliberately not holding _lock here. _force_safe_sit()
+        # acquires _lock itself; since threading.Lock is not reentrant,
+        # holding it here too would make that inner acquire block for its
+        # full 5s timeout on every idle cycle, starving real /gait calls
+        # with false 409s AND silently defeating the auto-sit itself.
+        # Reading _last_command_time without the lock is fine -- it's a
+        # single float read/write, atomic in CPython, and worst case we
+        # act on a value that's a few hundred ms stale.
+        if _hardware_fault:
+            continue  # already known broken -- retrying won't help, needs a restart
+        idle = time.time() - _last_command_time
+        if idle > WATCHDOG_TIMEOUT:
+            print(f"[relay] WATCHDOG: idle {idle:.1f}s > {WATCHDOG_TIMEOUT}s, forcing safe sit")
+            _force_safe_sit()
 
 threading.Thread(target=_watchdog_loop, daemon=True).start()
