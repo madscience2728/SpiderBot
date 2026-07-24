@@ -250,6 +250,62 @@ def camera_frame():
 
 SENSOR_TIMEOUT = 3.0 # ultrasonic/ADC reads should be near-instant; this is generous
 
+# --- Speech (Piper TTS, on-device) ---
+# Text in, audio out, entirely on the Pi -- only the text itself needs to
+# cross the network from spider_brain, not audio bytes. Requires a Piper
+# voice model already downloaded on the Pi (.onnx + .onnx.json) -- see
+# PIPER_MODEL_PATH below. Separate lock from the I2C _lock above: the
+# speaker is a different physical resource (ALSA/audio), not the I2C bus,
+# so speech and gait execution can genuinely happen at the same time --
+# the robot can talk while it walks, same as a person.
+PIPER_MODEL_PATH = "/home/spider/piper_voices/en_US-lessac-medium.onnx" # adjust to wherever you download the voice model
+SPEECH_SYNTH_TIMEOUT = 15.0
+SPEECH_PLAYBACK_TIMEOUT = 20.0
+
+_speech_lock = threading.Lock()
+
+class SpeakCommand(BaseModel):
+    text: str
+
+def _synthesize_and_play(text: str):
+    import subprocess
+    import tempfile
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
+            subprocess.run(
+                ["piper", "--model", PIPER_MODEL_PATH, "--output_file", f.name],
+                input=text.encode("utf-8"),
+                timeout=SPEECH_SYNTH_TIMEOUT,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["aplay", f.name],
+                timeout=SPEECH_PLAYBACK_TIMEOUT,
+                check=True,
+                capture_output=True,
+            )
+    except subprocess.TimeoutExpired as e:
+        print(f"[relay] SPEECH TIMED OUT: {e}")
+    except subprocess.CalledProcessError as e:
+        print(f"[relay] SPEECH FAILED (exit {e.returncode}): {e.stderr}")
+    except Exception as e:
+        print(f"[relay] SPEECH FAILED: {e}")
+    finally:
+        _speech_lock.release()
+
+@app.post("/speak")
+def speak(cmd: SpeakCommand):
+    # Non-blocking: if we're already mid-utterance, drop this one rather
+    # than queueing or blocking the caller -- a skipped line is fine, a
+    # blocked gait cycle waiting on speech to finish is not.
+    acquired = _speech_lock.acquire(blocking=False)
+    if not acquired:
+        raise HTTPException(status_code=409, detail="already speaking, this utterance skipped")
+    t = threading.Thread(target=_synthesize_and_play, args=(cmd.text,), daemon=True)
+    t.start()
+    return {"speaking": cmd.text}
+
 def _run_with_timeout(func, timeout: float):
     """Run func() in a dedicated thread and wait up to `timeout` seconds.
 

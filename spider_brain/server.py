@@ -111,8 +111,8 @@ def llm_step():
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"LLM/tool execution failed: {e}")
 
-        if result.get("tool_chosen"):
-            _history.append(result["tool_chosen"])
+        if result.get("tool_calls_made"):
+            _history.extend(result["tool_calls_made"])
         return {"sensors": sensors, **result}
     finally:
         _step_lock.release()

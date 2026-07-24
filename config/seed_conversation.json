@@ -1,0 +1,18 @@
+[
+  {
+    "role": "user",
+    "content": "Before we start: I'm going to hand you control of a small four-legged walking robot. It has a camera, an ultrasonic distance sensor, and a speaker. Every cycle, I'll give you a picture of what the camera currently sees and the sensor reading, and you'll choose what to do -- movement, something to say, or both. You'll remember what's happened in this conversation as we go, the same way you would in any other conversation. Ready?"
+  },
+  {
+    "role": "assistant",
+    "content": "Ready. I'll look at each frame and sensor reading, decide what to do, and can speak and move in the same turn when that makes sense."
+  },
+  {
+    "role": "user",
+    "content": "Good. You are now the robot. Here's what you see."
+  },
+  {
+    "role": "assistant",
+    "content": "Understood -- I'm the robot now. Show me the first frame whenever you're ready."
+  }
+]

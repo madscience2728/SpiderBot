@@ -63,3 +63,15 @@ def send_stop(timeout: int = 15) -> dict:
     r = requests.post(f"{_base_url()}/stop", timeout=timeout)
     r.raise_for_status()
     return r.json()
+
+def send_speak(text: str, timeout: int = 5) -> dict:
+    """Fire-and-forget-ish: the relay starts Piper synthesis + playback in
+    a background thread and returns immediately (this call just confirms
+    it was accepted, not that speech finished). A 409 here means the
+    robot was already mid-utterance and this one got dropped -- that's
+    an expected, non-fatal outcome, not an error worth raising on."""
+    r = requests.post(f"{_base_url()}/speak", json={"text": text}, timeout=timeout)
+    if r.status_code == 409:
+        return {"skipped": True, "reason": "already speaking"}
+    r.raise_for_status()
+    return r.json()
