@@ -9,6 +9,7 @@ easier to test, and safer while brain.py is still a mock / not yet an LLM
 you fully trust to run unsupervised.
 """
 
+from pathlib import Path
 from typing import List
 import threading
 
@@ -24,7 +25,12 @@ from fastapi.staticfiles import StaticFiles
 from spider_brain.web_routes import router as web_router
 
 app.include_router(web_router)
-app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
+
+# Absolute, not relative to cwd — so `python3 main.py` works the same
+# whether it's launched from the repo root, double-clicked from a file
+# browser, or run from a systemd unit with a different working directory.
+_FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+app.mount("/ui", StaticFiles(directory=str(_FRONTEND_DIR), html=True), name="ui")
 
 _history: List[str] = []
 _last_sensors: dict = {}
