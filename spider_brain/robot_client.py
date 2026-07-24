@@ -38,6 +38,14 @@ def get_camera_status(timeout: int = 5) -> dict:
     r.raise_for_status()
     return r.json()
 
+def get_camera_frame(timeout: int = 10) -> dict:
+    """Returns {"image_base64": ..., "format": "jpeg", "timestamp": ...}.
+    Longer default timeout than sensors/battery -- JPEG encode + base64 +
+    transfer over the network is more work than a quick I2C read."""
+    r = requests.get(f"{_base_url()}/camera/frame", timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
 def get_battery(timeout: int = 5) -> dict:
     r = requests.get(f"{_base_url()}/battery", timeout=timeout)
     r.raise_for_status()

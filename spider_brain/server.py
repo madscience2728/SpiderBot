@@ -95,10 +95,19 @@ def llm_step():
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"couldn't reach robot sensors: {e}")
 
+        try:
+            frame = robot_client.get_camera_frame()
+        except Exception as e:
+            # Deliberately fail loud (not a silent fallback to blind
+            # operation) while we're still proving the vision path works.
+            # Once that's confirmed, this is a reasonable spot to instead
+            # log a warning and pass frame=None through to decide_and_act.
+            raise HTTPException(status_code=502, detail=f"couldn't reach robot camera: {e}")
+
         _last_sensors = sensors
 
         try:
-            result = decide_and_act(sensors)
+            result = decide_and_act(sensors, frame["image_base64"])
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"LLM/tool execution failed: {e}")
 

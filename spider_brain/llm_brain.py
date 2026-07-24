@@ -19,17 +19,37 @@ _adapter = LLMAdapter()
 _system_prompt = load_system_prompt()
 
 
-def decide_and_act(sensors: dict) -> dict:
-    """One full LLM-driven cycle: observe (sensors) -> decide (tool call)
-    -> act (execute it). Returns what happened, for logging/status."""
+def decide_and_act(sensors: dict, image_base64: str = None) -> dict:
+    """One full LLM-driven cycle: observe (sensors + camera frame) ->
+    decide (tool call) -> act (execute it). Returns what happened, for
+    logging/status.
+
+    image_base64 is optional so this still works with the old sensors-only
+    flow (or a test harness with no camera) -- when provided, it's sent as
+    an image_url content part alongside the text, per llama.cpp's
+    OpenAI-compatible vision format. Note: Ezra's project (where this
+    adapter pattern comes from) never actually implemented image input
+    despite having mmproj configured -- there was no reference code to
+    mirror here, so this part is new, not ported.
+    """
     print(f"\n[llm_brain] Sensors: {sensors}")
+
+    user_text = f"Current sensor reading: {sensors}. Choose one action."
+
+    if image_base64:
+        user_content = [
+            {"type": "text", "text": user_text},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"},
+            },
+        ]
+    else:
+        user_content = user_text
 
     messages = [
         {"role": "system", "content": _system_prompt},
-        {
-            "role": "user",
-            "content": f"Current sensor reading: {sensors}. Choose one action.",
-        },
+        {"role": "user", "content": user_content},
     ]
 
     _adapter.ensure_ready()

@@ -211,6 +211,43 @@ def camera_status():
         "started": _camera_started,
     }
 
+@app.get("/camera/frame")
+def camera_frame():
+    """Single JPEG frame, base64-encoded, for the brain's vision calls --
+    separate from the always-on MJPEG stream at :9000/mjpg (that's for a
+    human watching the dashboard; this is for the LLM to see one frame
+    per decision cycle).
+
+    Vilib.img is the same numpy array (BGR, from picam2.capture_array())
+    that vilib's own take_photo() writes with cv2.imwrite() -- confirmed
+    against vilib's source, not guessed. Before the camera loop has run
+    at least once, Vilib.img is still its class-level placeholder
+    (Manager().list(range(1)), i.e. not a real frame), so we check
+    _camera_started and the array shape before trusting it.
+
+    Camera is on the CSI ribbon, a separate physical bus from the I2C
+    servos/sensors -- no need for _lock here.
+    """
+    if not _vilib_available or not _camera_started:
+        raise HTTPException(status_code=503, detail="camera not available/started")
+
+    import base64
+    import cv2
+
+    frame = Vilib.img
+    if frame is None or not hasattr(frame, "shape"):
+        raise HTTPException(status_code=503, detail="no camera frame available yet")
+
+    ok, buf = cv2.imencode(".jpg", frame)
+    if not ok:
+        raise HTTPException(status_code=500, detail="failed to encode frame as JPEG")
+
+    return {
+        "image_base64": base64.b64encode(buf).decode("ascii"),
+        "format": "jpeg",
+        "timestamp": time.time(),
+    }
+
 SENSOR_TIMEOUT = 3.0 # ultrasonic/ADC reads should be near-instant; this is generous
 
 def _run_with_timeout(func, timeout: float):
