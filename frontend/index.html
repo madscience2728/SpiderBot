@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SpiderBot Control</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- ============ HEADER / STATUS BAR ============
+       Always visible, regardless of which panel (Manual / AI) is active.
+       Populated by app.js via periodic polling. -->
+  <header class="topbar">
+    <h1>SpiderBot Control</h1>
+    <div class="status-chips" id="status-chips">
+      <div class="chip" id="chip-connection" data-state="unknown">
+        <span class="dot"></span> Connection: <span class="value">checking...</span>
+      </div>
+      <div class="chip" id="chip-health" data-state="unknown">
+        <span class="dot"></span> Health: <span class="value">checking...</span>
+      </div>
+      <div class="chip" id="chip-battery" data-state="unknown">
+        <span class="dot"></span> Battery: <span class="value">--</span>
+      </div>
+      <div class="chip" id="chip-brain" data-state="unknown">
+        <span class="dot"></span> Brain: <span class="value">idle</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ MODE TOGGLE ============ -->
+  <nav class="mode-toggle">
+    <button class="toggle-btn active" id="btn-tab-manual" data-tab="manual">Manual Control</button>
+    <button class="toggle-btn" id="btn-tab-ai" data-tab="ai">AI Control</button>
+  </nav>
+
+  <main>
+
+    <!-- ============ MANUAL CONTROL PANEL ============ -->
+    <section id="panel-manual" class="panel active">
+      <div class="panel-grid">
+
+        <div class="card">
+          <h2>Gait Controls</h2>
+          <p class="hint" id="manual-lock-hint" hidden>
+            The AI loop is currently running. Stop it from the AI Control tab before sending
+            manual commands.
+          </p>
+          <div class="gait-grid">
+            <button class="gait-btn" data-action="forward">Forward</button>
+            <div class="gait-row">
+              <button class="gait-btn" data-action="turn left">Turn Left</button>
+              <button class="gait-btn" data-action="stand">Stand</button>
+              <button class="gait-btn" data-action="turn right">Turn Right</button>
+            </div>
+            <button class="gait-btn" data-action="backward">Backward</button>
+            <button class="gait-btn danger" data-action="sit">Sit (Safe)</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Live Sensors</h2>
+          <div class="sensor-row">
+            <span class="sensor-label">Ultrasonic distance</span>
+            <span class="sensor-value" id="sensor-distance">-- cm</span>
+          </div>
+          <p class="hint">Only the ultrasonic sensor is currently wired up on the robot.</p>
+        </div>
+
+        <div class="card camera-card">
+          <h2>Camera Feed</h2>
+          <div class="camera-frame">
+            <img id="camera-feed" alt="Camera feed unavailable" />
+            <div class="camera-placeholder" id="camera-placeholder">no signal</div>
+          </div>
+          <div class="camera-controls">
+            <span class="camera-status" id="camera-status">checking...</span>
+            <button id="btn-camera-reconnect" class="secondary">Reconnect</button>
+          </div>
+          <p class="hint">Streamed directly from the Pi (vilib's own MJPEG server on port 9000), not proxied through the brain.</p>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ============ AI CONTROL PANEL ============ -->
+    <section id="panel-ai" class="panel">
+      <div class="panel-grid">
+
+        <div class="card">
+          <h2>Autonomous Loop</h2>
+          <div class="ai-mode-select">
+            <label><input type="radio" name="ai-mode" value="mock" checked /> Mock brain (fixed action cycle)</label>
+            <label><input type="radio" name="ai-mode" value="llm" /> LLM brain (real decisions)</label>
+          </div>
+          <div class="ai-buttons">
+            <button id="btn-ai-start" class="primary">Start Loop</button>
+            <button id="btn-ai-stop" class="danger">Stop / Sit</button>
+          </div>
+          <p class="hint">
+            The brain's /step and /llm_step only run one cycle at a time (by design --
+            see server.py) -- there's no server-side loop. "Start Loop" repeats the
+            chosen step on a timer from right here in the browser; closing this tab
+            stops the repeating, though the robot stays wherever it last was until
+            "Stop / Sit" or the Pi's own 30s watchdog kicks in.
+          </p>
+        </div>
+
+        <div class="card">
+          <h2>Decision Log</h2>
+          <ul class="decision-log" id="decision-log">
+            <li class="empty">No decisions yet.</li>
+          </ul>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ============ EXTENSION SLOT ============
+         Placeholder for future panels (e.g. LLM latency, command history
+         export, config editor). Camera feed now lives in the Manual
+         Control panel above. -->
+    <section id="panel-extra" class="panel-static">
+      <div class="card muted">
+        <h2>More coming soon</h2>
+        <p class="hint">This space is reserved for whatever we add next (LLM timing, config editor, etc.).</p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="log-console">
+    <div class="log-console-header">Event Log</div>
+    <div id="event-log"></div>
+  </footer>
+
+  <script src="js/api.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

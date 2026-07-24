@@ -20,6 +20,12 @@ from spider_brain.llm_brain import decide_and_act
 
 app = FastAPI()
 
+from fastapi.staticfiles import StaticFiles
+from spider_brain.web_routes import router as web_router
+
+app.include_router(web_router)
+app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
+
 _history: List[str] = []
 _last_sensors: dict = {}
 _step_lock = threading.Lock()

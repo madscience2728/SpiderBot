@@ -33,6 +33,15 @@ def get_sensors(timeout: int = 5) -> dict:
     r.raise_for_status()
     return r.json()
 
+def get_camera_status(timeout: int = 5) -> dict:
+    r = requests.get(f"{_base_url()}/camera/status", timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+def get_battery(timeout: int = 5) -> dict:
+    r = requests.get(f"{_base_url()}/battery", timeout=timeout)
+    r.raise_for_status()
+    return r.json()
 
 def send_gait(action: str, speed: int = 80, timeout: int = 15) -> dict:
     r = requests.post(

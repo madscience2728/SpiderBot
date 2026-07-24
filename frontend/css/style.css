@@ -1,0 +1,298 @@
+/* ==========================================================================
+   SpiderBot Control - dashboard styles
+   Single stylesheet kept intentionally simple (no build step / framework)
+   so it's easy for anyone to tweak directly.
+   ========================================================================== */
+
+:root {
+  --bg: #0f1216;
+  --panel: #171b21;
+  --panel-alt: #1e232b;
+  --border: #2a303a;
+  --text: #e6e9ef;
+  --text-dim: #8b93a1;
+  --accent: #4f8cff;
+  --ok: #3ecf8e;
+  --warn: #e8b339;
+  --danger: #e8556f;
+  --unknown: #565d6a;
+  font-size: 15px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+h1, h2 { margin: 0 0 0.5em 0; }
+
+/* ---------- Header / status chips ---------- */
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 24px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar h1 { font-size: 1.3rem; }
+
+.status-chips {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.chip .value { color: var(--text); font-weight: 600; }
+
+.chip .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--unknown);
+  display: inline-block;
+}
+
+.chip[data-state="ok"] .dot { background: var(--ok); }
+.chip[data-state="warn"] .dot { background: var(--warn); }
+.chip[data-state="error"] .dot { background: var(--danger); }
+.chip[data-state="unknown"] .dot { background: var(--unknown); }
+
+/* ---------- Mode toggle ---------- */
+
+.mode-toggle {
+  display: flex;
+  gap: 4px;
+  padding: 12px 24px 0 24px;
+}
+
+.toggle-btn {
+  padding: 10px 20px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  color: var(--text-dim);
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.toggle-btn.active {
+  background: var(--panel-alt);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ---------- Panels ---------- */
+
+main {
+  padding: 0 24px 24px 24px;
+}
+
+.panel { display: none; background: var(--panel-alt); border: 1px solid var(--border); border-radius: 0 8px 8px 8px; padding: 20px; }
+.panel.active { display: block; }
+.panel-static { margin-top: 16px; }
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.card.muted { color: var(--text-dim); }
+
+.hint { color: var(--text-dim); font-size: 0.85rem; margin: 8px 0 0 0; }
+
+/* ---------- Gait controls ---------- */
+
+.gait-grid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.gait-row { display: flex; gap: 8px; }
+
+.gait-btn {
+  min-width: 84px;
+  padding: 14px 10px;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.gait-btn:hover:not(:disabled) { border-color: var(--accent); }
+.gait-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.gait-btn.danger { border-color: var(--danger); color: var(--danger); }
+
+/* ---------- Sensors ---------- */
+
+.sensor-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.sensor-value { font-weight: 600; }
+
+/* ---------- Camera ---------- */
+
+.camera-card { grid-column: 1 / -1; }
+
+.camera-frame {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  aspect-ratio: 4 / 3;
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.camera-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.camera-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.camera-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.camera-status { color: var(--text-dim); font-size: 0.85rem; }
+
+button.secondary {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-alt);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+button.secondary:hover { border-color: var(--accent); }
+
+/* ---------- AI panel ---------- */
+
+.ai-mode-select {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+  color: var(--text-dim);
+}
+
+.ai-buttons { display: flex; gap: 10px; margin-top: 8px; }
+
+button.primary, button.danger {
+  padding: 10px 18px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button.primary { background: var(--accent); color: white; }
+button.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
+button.primary:disabled, button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.decision-log {
+  list-style: none;
+  margin: 12px 0 0 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.decision-log li {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-dim);
+}
+
+.decision-log li .action { color: var(--text); font-weight: 600; }
+.decision-log li.empty { justify-content: center; }
+
+/* ---------- Footer event log ---------- */
+
+.log-console {
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  padding: 10px 24px;
+}
+
+.log-console-header {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+#event-log {
+  max-height: 120px;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+#event-log div { padding: 2px 0; }
+#event-log div.err { color: var(--danger); }
